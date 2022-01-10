@@ -93,15 +93,15 @@ impl PromiseAction {
     }
 }
 
-struct PromiseSingle {
-    pub account_id: AccountId,
+struct PromiseSingle<'a> {
+    pub account_id: &'a AccountId,
     pub actions: RefCell<Vec<PromiseAction>>,
-    pub after: RefCell<Option<Promise>>,
+    pub after: RefCell<Option<Promise<'a>>>,
     /// Promise index that is computed only once.
     pub promise_index: RefCell<Option<PromiseIndex>>,
 }
 
-impl PromiseSingle {
+impl PromiseSingle<'_> {
     pub fn construct_recursively(&self) -> PromiseIndex {
         let mut promise_lock = self.promise_index.borrow_mut();
         if let Some(res) = promise_lock.as_ref() {
@@ -121,14 +121,14 @@ impl PromiseSingle {
     }
 }
 
-pub struct PromiseJoint {
-    pub promise_a: Promise,
-    pub promise_b: Promise,
+pub struct PromiseJoint<'a> {
+    pub promise_a: Promise<'a>,
+    pub promise_b: Promise<'a>,
     /// Promise index that is computed only once.
     pub promise_index: RefCell<Option<PromiseIndex>>,
 }
 
-impl PromiseJoint {
+impl PromiseJoint<'_> {
     pub fn construct_recursively(&self) -> PromiseIndex {
         let mut promise_lock = self.promise_index.borrow_mut();
         if let Some(res) = promise_lock.as_ref() {
@@ -184,13 +184,13 @@ impl PromiseJoint {
 ///   .add_full_access_key(env::signer_account_pk());
 /// ```
 #[derive(Clone)]
-pub struct Promise {
-    subtype: PromiseSubtype,
+pub struct Promise<'a> {
+    subtype: PromiseSubtype<'a>,
     should_return: RefCell<bool>,
 }
 
 /// Until we implement strongly typed promises we serialize them as unit struct.
-impl BorshSchema for Promise {
+impl BorshSchema for Promise<'_> {
     fn add_definitions_recursively(
         definitions: &mut HashMap<borsh::schema::Declaration, borsh::schema::Definition>,
     ) {
@@ -203,14 +203,14 @@ impl BorshSchema for Promise {
 }
 
 #[derive(Clone)]
-enum PromiseSubtype {
-    Single(Rc<PromiseSingle>),
-    Joint(Rc<PromiseJoint>),
+enum PromiseSubtype<'a> {
+    Single(Rc<PromiseSingle<'a>>),
+    Joint(Rc<PromiseJoint<'a>>),
 }
 
-impl Promise {
+impl<'a> Promise<'a> {
     /// Create a promise that acts on the given account.
-    pub fn new(account_id: AccountId) -> Self {
+    pub fn new(account_id: &'a AccountId) -> Self {
         Self {
             subtype: PromiseSubtype::Single(Rc::new(PromiseSingle {
                 account_id,
@@ -327,7 +327,7 @@ impl Promise {
     /// let p3 = p1.and(p2);
     /// // p3.create_account();
     /// ```
-    pub fn and(self, other: Promise) -> Promise {
+    pub fn and(self, other: Promise<'a>) -> Promise {
         Promise {
             subtype: PromiseSubtype::Joint(Rc::new(PromiseJoint {
                 promise_a: self,
@@ -351,7 +351,7 @@ impl Promise {
     /// let p4 = Promise::new("eva_near".parse().unwrap()).create_account();
     /// p1.then(p2).and(p3).then(p4);
     /// ```
-    pub fn then(self, mut other: Promise) -> Promise {
+    pub fn then(self, mut other: Promise<'a>) -> Promise {
         match &mut other.subtype {
             PromiseSubtype::Single(x) => *x.after.borrow_mut() = Some(self),
             PromiseSubtype::Joint(_) => crate::env::panic_str("Cannot callback joint promise."),
@@ -404,13 +404,13 @@ impl Promise {
     }
 }
 
-impl Drop for Promise {
+impl Drop for Promise<'_> {
     fn drop(&mut self) {
         self.construct_recursively();
     }
 }
 
-impl serde::Serialize for Promise {
+impl serde::Serialize for Promise<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -420,7 +420,7 @@ impl serde::Serialize for Promise {
     }
 }
 
-impl borsh::BorshSerialize for Promise {
+impl borsh::BorshSerialize for Promise<'_> {
     fn serialize<W: Write>(&self, _writer: &mut W) -> Result<(), Error> {
         *self.should_return.borrow_mut() = true;
 
@@ -432,12 +432,12 @@ impl borsh::BorshSerialize for Promise {
 
 #[derive(serde::Serialize)]
 #[serde(untagged)]
-pub enum PromiseOrValue<T> {
-    Promise(Promise),
+pub enum PromiseOrValue<'a, T> {
+    Promise(Promise<'a>),
     Value(T),
 }
 
-impl<T> BorshSchema for PromiseOrValue<T>
+impl<T> BorshSchema for PromiseOrValue<'_, T>
 where
     T: BorshSchema,
 {
@@ -452,13 +452,13 @@ where
     }
 }
 
-impl<T> From<Promise> for PromiseOrValue<T> {
-    fn from(promise: Promise) -> Self {
+impl<'a, T> From<Promise<'a>> for PromiseOrValue<'a, T> {
+    fn from(promise: Promise<'a>) -> Self {
         PromiseOrValue::Promise(promise)
     }
 }
 
-impl<T: borsh::BorshSerialize> borsh::BorshSerialize for PromiseOrValue<T> {
+impl<T: borsh::BorshSerialize> borsh::BorshSerialize for PromiseOrValue<'_, T> {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         match self {
             // Only actual value is serialized.
