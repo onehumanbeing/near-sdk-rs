@@ -1,5 +1,4 @@
 # Workspaces Migration Guide
-
 TODO: write about context, why simtests was not suitable as a testing framework and how workspaces is different
 
 ## Transitioning existing near-sdk-sim powered tests to workspaces
@@ -35,10 +34,13 @@ async fn simulate_transfer() -> anyhow::Result<()> {
 This way you can use `?` anywhere inside the test to safely unpack any `anyhow::Result<R>` type to `R` (will be very useful further down the guide). Note that the test will fail if `anyhow::Result<R>` cannot be unpacked.
 
 ### Initialization
+The usual way to initialize simulator looks like this:
 
 ```rust
-let root = init_simulator(None);
+let root = near_sdk_sim::init_simulator(...);
 ```
+
+For workspaces, we use an actual NEAR node
 
 ### Making transactions
 
