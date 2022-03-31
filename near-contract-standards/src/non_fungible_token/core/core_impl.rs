@@ -166,7 +166,7 @@ impl NonFungibleToken {
                 if let Some(token_metadata_by_id) = &mut self.token_metadata_by_id {
                     token_metadata_by_id.remove(&token_id);
                 }
-            })
+            });
         self.owner_by_id.clear();
     }
 
