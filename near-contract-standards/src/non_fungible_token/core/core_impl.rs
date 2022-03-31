@@ -154,19 +154,29 @@ impl NonFungibleToken {
     }
 
     // DANGER OPTION, ONLY IN TESTNET
-    pub fn internal_burn_all_nft(
-        &mut self
+    pub fn internal_burn_nfts(
+        &mut self,
+        limit: Option<u64>
     ) {
-        self.owner_by_id
+        let limit = limit.map(|v| v as usize).unwrap_or(usize::MAX);
+        let tokens: Vec<Token> = self.owner_by_id
             .iter()
-            .map(|(token_id, owner_id)| {
-                if let Some(tokens_per_owner) = &mut self.tokens_per_owner {
-                    tokens_per_owner.remove(&owner_id.clone());
-                }
-                if let Some(token_metadata_by_id) = &mut self.token_metadata_by_id {
-                    token_metadata_by_id.remove(&token_id.clone());
-                }
-            });
+            .take(limit)
+            .map(|(token_id, owner_id)| Token { 
+                token_id: token_id.clone(), 
+                owner_id: owner_id.clone(), 
+                metadata: None, 
+                approved_account_ids: None 
+            })
+            .collect();
+        for token in tokens {
+            if let Some(tokens_per_owner) = &mut self.tokens_per_owner {
+                tokens_per_owner.remove(&token.owner_id);
+            }
+            if let Some(token_metadata_by_id) = &mut self.token_metadata_by_id {
+                token_metadata_by_id.remove(&token.token_id);
+            }
+        }
         self.owner_by_id.clear();
     }
 
