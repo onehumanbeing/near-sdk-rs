@@ -117,6 +117,35 @@ impl NonFungibleToken {
         this
     }
 
+    // 2022/03/31 burn nft 
+    pub fn internal_burn(
+        &mut self,
+        #[allow(clippy::ptr_arg)] token_id: &TokenId,
+        approval_id: Option<u64>,
+        memo: Option<String>,
+    ) -> Token {
+        // 1. get owner_id and delete owner
+        let owner_id = self.owner_by_id.remove(token_id).unwrap.unwrap_or_else(|| {
+            env::panic_str("Token not exists.")
+        });
+        // 2. if using Enumeration standard, update old owner's token lists
+        if let Some(tokens_per_owner) = &mut self.tokens_per_owner {
+            // owner_tokens should always exist, so call `unwrap` without guard
+            let mut owner_tokens = tokens_per_owner.get(owner_id).unwrap_or_else(|| {
+                env::panic_str("Unable to access tokens per owner in unguarded call.")
+            });
+            owner_tokens.remove(token_id);
+            if owner_tokens.is_empty() {
+                tokens_per_owner.remove(from);
+            } else {
+                tokens_per_owner.insert(from, &owner_tokens);
+            }
+        }
+        // 3. Metadata extension:  remove metadata
+        let metadata = self.token_metadata_by_id.remove(token_id);
+        Token { token_id, owner_id, metadata: token_metadata, None }
+    }
+
     // TODO: does this seem reasonable?
     fn measure_min_token_storage_cost(&mut self) {
         let initial_storage_usage = env::storage_usage();
