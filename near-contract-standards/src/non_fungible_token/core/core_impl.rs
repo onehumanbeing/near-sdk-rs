@@ -153,6 +153,19 @@ impl NonFungibleToken {
         }
     }
 
+    // DANGER OPTION, ONLY IN TESTNET
+    pub fn internal_burn_all_nft(
+        &mut self
+    ) {
+        self.owner_by_id.clear();
+        if let Some(tokens_per_owner) = &mut self.tokens_per_owner {
+            tokens_per_owner.clear();
+        }
+        if let Some(token_metadata_by_id) = &mut self.token_metadata_by_id {
+            token_metadata_by_id.clear();
+        }
+    }
+
     // TODO: does this seem reasonable?
     fn measure_min_token_storage_cost(&mut self) {
         let initial_storage_usage = env::storage_usage();
