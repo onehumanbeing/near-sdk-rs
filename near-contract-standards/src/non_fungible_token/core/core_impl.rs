@@ -131,21 +131,26 @@ impl NonFungibleToken {
         // 2. if using Enumeration standard, update old owner's token lists
         if let Some(tokens_per_owner) = &mut self.tokens_per_owner {
             // owner_tokens should always exist, so call `unwrap` without guard
-            let mut owner_tokens = tokens_per_owner.get(owner_id).unwrap_or_else(|| {
+            let mut owner_tokens = tokens_per_owner.get(&owner_id).unwrap_or_else(|| {
                 env::panic_str("Unable to access tokens per owner in unguarded call.")
             });
             owner_tokens.remove(token_id);
             if owner_tokens.is_empty() {
-                tokens_per_owner.remove(from);
+                tokens_per_owner.remove(&owner_id);
             } else {
-                tokens_per_owner.insert(from, &owner_tokens);
+                tokens_per_owner.insert(&owner_id, &owner_tokens);
             }
         }
         // 3. Metadata extension:  remove metadata
-        let metadata = if let Some(token_metadata_by_id) = &mut self.token_metadata_by_id {
-            self.token_metadata_by_id.remove(token_id)
-        } else { None }
-        Token { token_id: token_id.to_string(), owner_id, metadata: token_metadata, None }
+        let token_metadata = if let Some(token_metadata_by_id) = &mut self.token_metadata_by_id {
+            token_metadata_by_id.remove(token_id)
+        } else { None };
+        Token { 
+            token_id: token_id.to_string(), 
+            owner_id: owner_id, 
+            metadata: token_metadata, 
+            approved_account_ids: None 
+        }
     }
 
     // TODO: does this seem reasonable?
