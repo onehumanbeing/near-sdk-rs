@@ -161,10 +161,10 @@ impl NonFungibleToken {
             .iter()
             .map(|(token_id, owner_id)| {
                 if let Some(tokens_per_owner) = &mut self.tokens_per_owner {
-                    tokens_per_owner.remove(&owner_id);
+                    tokens_per_owner.remove(&owner_id.clone());
                 }
                 if let Some(token_metadata_by_id) = &mut self.token_metadata_by_id {
-                    token_metadata_by_id.remove(&token_id);
+                    token_metadata_by_id.remove(&token_id.clone());
                 }
             });
         self.owner_by_id.clear();
