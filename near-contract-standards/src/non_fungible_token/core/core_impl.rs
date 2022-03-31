@@ -125,7 +125,7 @@ impl NonFungibleToken {
         memo: Option<String>,
     ) -> Token {
         // 1. get owner_id and delete owner
-        let owner_id = self.owner_by_id.remove(token_id).unwrap.unwrap_or_else(|| {
+        let owner_id = self.owner_by_id.remove(token_id).unwrap_or_else(|| {
             env::panic_str("Token not exists.")
         });
         // 2. if using Enumeration standard, update old owner's token lists
@@ -142,8 +142,10 @@ impl NonFungibleToken {
             }
         }
         // 3. Metadata extension:  remove metadata
-        let metadata = self.token_metadata_by_id.remove(token_id);
-        Token { token_id, owner_id, metadata: token_metadata, None }
+        let metadata = if let Some(token_metadata_by_id) = &mut self.token_metadata_by_id {
+            self.token_metadata_by_id.remove(token_id)
+        } else { None }
+        Token { token_id: token_id.to_string(), owner_id, metadata: token_metadata, None }
     }
 
     // TODO: does this seem reasonable?
