@@ -10,11 +10,14 @@ impl NonFungibleToken {
     /// Helper function used by a enumerations methods
     /// Note: this method is not exposed publicly to end users
     fn enum_get_token(&self, owner_id: AccountId, token_id: TokenId) -> Token {
+        let token_owner = self.get_token_owner(&token_id).unwrap_or_else(|| env::panic_str("Token not found"));
+        let token_owner_id = token_owner.owner_id;
+        let rent = token_owner.rent;
         let metadata = self.token_metadata_by_id.as_ref().unwrap().get(&token_id);
         let approved_account_ids =
             Some(self.approvals_by_id.as_ref().unwrap().get(&token_id).unwrap_or_default());
 
-        Token { token_id, owner_id, metadata, approved_account_ids }
+        Token { token_id, owner_id: token_owner_id, metadata, approved_account_ids, rent: Some(rent) }
     }
 }
 
@@ -50,10 +53,13 @@ impl NonFungibleTokenEnumeration for NonFungibleToken {
                 enumeration standard.",
             )
         });
-        tokens_per_owner
-            .get(&account_id)
-            .map(|account_tokens| U128::from(account_tokens.len() as u128))
-            .unwrap_or(U128(0))
+        let tokens = tokens_per_owner.get(&account_id);
+        if tokens.is_none() { return U128(0); }
+        U128::from(tokens.unwrap().iter().filter(|token_id| !self.is_token_rent(&token_id, &account_id)).count() as u128)
+        // tokens_per_owner
+        //     .get(&account_id)
+        //     .map(|account_tokens| U128::from(account_tokens.len() as u128))
+        //     .unwrap_or(U128(0))
     }
 
     fn nft_tokens_for_owner(
@@ -82,6 +88,7 @@ impl NonFungibleTokenEnumeration for NonFungibleToken {
         );
         token_set
             .iter()
+            .filter(|token_id| !self.is_token_rent(&token_id, &account_id))
             .skip(start_index as usize)
             .take(limit)
             .map(|token_id| self.enum_get_token(account_id.clone(), token_id))

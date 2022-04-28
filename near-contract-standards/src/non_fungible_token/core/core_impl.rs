@@ -4,7 +4,7 @@ use crate::non_fungible_token::events::{NftMint, NftTransfer};
 use crate::non_fungible_token::metadata::TokenMetadata;
 use crate::non_fungible_token::token::{Token, TokenId};
 use crate::non_fungible_token::utils::{
-    hash_account_id, refund_approved_account_ids, refund_deposit_to_account,
+    hash_account_id, refund_approved_account_ids, refund_deposit_to_account, current_time
 };
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{LookupMap, TreeMap, UnorderedSet};
@@ -13,12 +13,20 @@ use near_sdk::{
     assert_one_yocto, env, ext_contract, require, AccountId, Balance, BorshStorageKey, CryptoHash,
     Gas, IntoStorageKey, PromiseOrValue, PromiseResult, StorageUsage,
 };
+use near_sdk::serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 const GAS_FOR_RESOLVE_TRANSFER: Gas = Gas(5_000_000_000_000);
 const GAS_FOR_NFT_TRANSFER_CALL: Gas = Gas(25_000_000_000_000 + GAS_FOR_RESOLVE_TRANSFER.0);
 
 const NO_DEPOSIT: Balance = 0;
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct TokenOwner {
+    pub owner_id: AccountId,
+    pub rent: bool
+} 
 
 #[ext_contract(ext_self)]
 trait NFTResolver {
@@ -72,6 +80,10 @@ pub struct NonFungibleToken {
     // required by approval extension
     pub approvals_by_id: Option<LookupMap<TokenId, HashMap<AccountId, u64>>>,
     pub next_approval_id_by_id: Option<LookupMap<TokenId, u64>>,
+
+    // require to rent nft
+    pub rent_owner_by_id: Option<LookupMap<TokenId, AccountId>>,
+    pub rent_expired_by_id: Option<LookupMap<TokenId, u64>>
 }
 
 #[derive(BorshStorageKey, BorshSerialize)]
@@ -81,20 +93,32 @@ pub enum StorageKey {
 }
 
 impl NonFungibleToken {
-    pub fn new<Q, R, S, T>(
+    pub fn new<Q, R, S, T, U>(
         owner_by_id_prefix: Q,
         owner_id: AccountId,
         token_metadata_prefix: Option<R>,
         enumeration_prefix: Option<S>,
         approval_prefix: Option<T>,
+        rent_prefix: Option<U>,
     ) -> Self
     where
         Q: IntoStorageKey,
         R: IntoStorageKey,
         S: IntoStorageKey,
         T: IntoStorageKey,
+        U: IntoStorageKey,
     {
         let (approvals_by_id, next_approval_id_by_id) = if let Some(prefix) = approval_prefix {
+            let prefix: Vec<u8> = prefix.into_storage_key();
+            (
+                Some(LookupMap::new(prefix.clone())),
+                Some(LookupMap::new([prefix, "n".into()].concat())),
+            )
+        } else {
+            (None, None)
+        };
+
+        let (rent_owner_by_id, rent_expired_by_id) = if let Some(prefix) = rent_prefix {
             let prefix: Vec<u8> = prefix.into_storage_key();
             (
                 Some(LookupMap::new(prefix.clone())),
@@ -112,9 +136,44 @@ impl NonFungibleToken {
             tokens_per_owner: enumeration_prefix.map(LookupMap::new),
             approvals_by_id,
             next_approval_id_by_id,
+            rent_owner_by_id,
+            rent_expired_by_id
         };
         this.measure_min_token_storage_cost();
         this
+    }
+
+    pub fn get_token_owner(&self, token_id: &TokenId) -> Option<TokenOwner> {
+        if let Some(owner_id) = self.owner_by_id.get(token_id) {
+            // exists
+            if self.rent_owner_by_id.is_none() {
+                return Some(TokenOwner { owner_id: owner_id, rent: false });
+            }
+            if let Some(rent_owner_id) = self.rent_owner_by_id.as_ref().unwrap().get(token_id) {
+                let expired = self.rent_expired_by_id.as_ref().unwrap().get(token_id).unwrap();
+                if expired < current_time() {
+                    return Some(TokenOwner { owner_id: owner_id, rent: false })
+                }
+                return Some(TokenOwner { owner_id: rent_owner_id, rent: true });
+            }
+            Some(TokenOwner { owner_id: owner_id, rent: false })
+        } else {
+            None
+        }
+    }
+
+    pub fn is_token_rent(&self, token_id: &TokenId, owner_id: &AccountId) -> bool {
+        if self.rent_owner_by_id.is_none() {
+            return false;
+        }
+        if let Some(rent_owner_id) = self.rent_owner_by_id.as_ref().unwrap().get(token_id) {
+            let expired = self.rent_expired_by_id.as_ref().unwrap().get(token_id).unwrap();
+            if expired < current_time() {
+                return false;
+            }
+            return true;
+        }
+        return false;
     }
 
     // 2022/03/31 burn nft 
@@ -149,7 +208,8 @@ impl NonFungibleToken {
             token_id: token_id.to_string(), 
             owner_id: owner_id, 
             metadata: token_metadata, 
-            approved_account_ids: None 
+            approved_account_ids: None,
+            rent: None
         }
     }
 
@@ -166,7 +226,8 @@ impl NonFungibleToken {
                 token_id: token_id.clone(), 
                 owner_id: owner_id.clone(), 
                 metadata: None, 
-                approved_account_ids: None 
+                approved_account_ids: None,
+                rent: None
             })
             .collect();
         for token in tokens {
@@ -300,9 +361,12 @@ impl NonFungibleToken {
         approval_id: Option<u64>,
         memo: Option<String>,
     ) -> (AccountId, Option<HashMap<AccountId, u64>>) {
-        let owner_id =
-            self.owner_by_id.get(token_id).unwrap_or_else(|| env::panic_str("Token not found"));
-
+        // let owner_id =
+        //     self.owner_by_id.get(token_id).unwrap_or_else(|| env::panic_str("Token not found"));
+        // rent update
+        let token_owner = self.get_token_owner(&token_id).unwrap_or_else(|| env::panic_str("Token not found"));
+        if token_owner.rent { env::panic_str("Token is rented"); }
+        let owner_id = token_owner.owner_id;
         // clear approvals, if using Approval Management extension
         // this will be rolled back by a panic if sending fails
         let approved_account_ids =
@@ -463,7 +527,7 @@ impl NonFungibleToken {
 
         // Return any extra attached deposit not used for storage
 
-        Token { token_id, owner_id, metadata: token_metadata, approved_account_ids }
+        Token { token_id, owner_id, metadata: token_metadata, approved_account_ids, rent: Some(false) }
     }
 }
 
@@ -519,13 +583,16 @@ impl NonFungibleTokenCore for NonFungibleToken {
     }
 
     fn nft_token(&self, token_id: TokenId) -> Option<Token> {
-        let owner_id = self.owner_by_id.get(&token_id)?;
+        // let owner_id = self.owner_by_id.get(&token_id)?;
+        let token_owner = self.get_token_owner(&token_id).unwrap_or_else(|| env::panic_str("Token not found"));
+        let owner_id = token_owner.owner_id;
+        let rent = token_owner.rent;
         let metadata = self.token_metadata_by_id.as_ref().and_then(|by_id| by_id.get(&token_id));
         let approved_account_ids = self
             .approvals_by_id
             .as_ref()
             .and_then(|by_id| by_id.get(&token_id).or_else(|| Some(HashMap::new())));
-        Some(Token { token_id, owner_id, metadata, approved_account_ids })
+        Some(Token { token_id, owner_id, metadata, approved_account_ids, rent: Some(rent) })
     }
 }
 

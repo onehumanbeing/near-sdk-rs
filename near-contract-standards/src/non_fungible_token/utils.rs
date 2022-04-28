@@ -56,3 +56,8 @@ pub fn hash_account_id(account_id: &AccountId) -> CryptoHash {
 pub(crate) fn assert_at_least_one_yocto() {
     require!(env::attached_deposit() >= 1, "Requires attached deposit of at least 1 yoctoNEAR")
 }
+
+pub(crate) fn current_time() -> u64 {
+    let nano_to_sec = 1000000000 as u64;
+    env::block_timestamp() as u64  / nano_to_sec
+}

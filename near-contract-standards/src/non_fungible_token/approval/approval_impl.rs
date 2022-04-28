@@ -39,13 +39,15 @@ impl NonFungibleTokenApproval for NonFungibleToken {
         msg: Option<String>,
     ) -> Option<Promise> {
         assert_at_least_one_yocto();
+        let token_owner = expect_token_found(self.get_token_owner(&token_id));
         let approvals_by_id = self
             .approvals_by_id
             .as_mut()
             .unwrap_or_else(|| env::panic_str("NFT does not support Approval Management"));
 
-        let owner_id = expect_token_found(self.owner_by_id.get(&token_id));
-
+        // let owner_id = expect_token_found(self.owner_by_id.get(&token_id));
+        if token_owner.rent { env::panic_str("Token is rented") }
+        let owner_id = token_owner.owner_id;
         require!(env::predecessor_account_id() == owner_id, "Predecessor must be token owner.");
 
         let next_approval_id_by_id = expect_approval(self.next_approval_id_by_id.as_mut());
